@@ -1,0 +1,15 @@
+# requirements.txt
+
+discord.py>=2.0.0
+python-dotenv
+aiohttp
+dnspython
+pyopenssl
+python-whois
+playwright>=1.30
+tldextract
+ipaddress
+requests # Keep if url_analyzer might use it as fallback
+beautifulsoup4 # Keep if url_analyzer might use it as fallback
+lxml # Keep if url_analyzer might use it as fallback
+httpx

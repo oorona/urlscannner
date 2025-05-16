@@ -1,0 +1,24 @@
+# docker-compose.yaml
+
+services:
+  discord-scanner-bot:
+    build: . # Build the image from the Dockerfile in the current directory
+    container_name: discord-scanner-bot # Optional: specify a container name
+    env_file:
+      - .env # Load environment variables from the .env file
+    restart: unless-stopped # Automatically restart the container unless manually stopped
+    volumes:
+      # Mount the log file from the container to the host for persistence/easy access
+      # Ensure the path inside the container matches where your logger writes the file
+      # The path depends on the WORKDIR and user after the switch.
+      # With WORKDIR /home/appuser/app, the log file will be created there.
+      - ./bot.log:/home/appuser/app/bot.log
+      - ./urllist.json:/home/appuser/app/urllist.json
+    # Optional: Define networks if needed for more complex setups
+    # networks:
+    #   - botnet
+
+# Optional: Define networks if used above
+# networks:
+#   botnet:
+#     driver: bridge

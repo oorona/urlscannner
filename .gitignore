@@ -1,0 +1,5 @@
+.env
+.venv
+urlanalysis/test_analysis_results_with_llm
+urlanalysis/test_analysis_results_only
+urlanalysis/test_analysis_results
