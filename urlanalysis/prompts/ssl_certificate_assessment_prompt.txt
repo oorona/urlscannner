@@ -1,16 +1,22 @@
 Analyze the following SSL/TLS certificate details for the hostname '{data[hostname]}' on port '{data[port]}':
+
+Current date for reference: {current_date_iso}
+
 Certificate Details (JSON):
 {data[details_json_str]}
+
 Connection or Certificate Retrieval Error (if any): {data[error]}
 Hostname matched certificate Common Name or SANs: {data[details][hostname_match]}
 
-Based *solely* on this SSL certificate information, identify any characteristics that might suggest the site is a scam or malicious. Consider:
-- Certificate validity period (e.g., very short-lived certificates from free CAs like Let's Encrypt, or unusually long validity).
+Based *solely* on this SSL certificate information (and referencing the current date provided), identify any characteristics that might suggest the site is a scam or malicious.
+Consider:
+- Certificate validity period (e.g., is it expired, not yet valid, very short-lived certificates from free CAs like Let's Encrypt, or unusually long validity). Ensure you compare 'valid_from' and 'valid_until' against the 'current_date_for_reference'.
 - Issuer (e.g., unknown or untrusted Certificate Authority, self-signed certificate).
 - Subject information (e.g., mismatch between CN/SANs and the actual hostname, generic or misleading organization name).
 - Certificate transparency log information if available (not directly provided here, but a factor for real CAs).
 - Strength of the encryption algorithms used (though usually modern, any very old/weak ones would be a flag).
 - Certificate revocation status (not checked here, but a real-world factor).
-- Date of issuance (very new certificate).
+- Date of issuance (how new is the certificate relative to the 'current_date_for_reference').
+Provide your assessment as a JSON object with "scam", "confidence", and "reason".
+If an error occurred during SSL check or certificate retrieval, or if there's no certificate, factor that heavily into your reason.
 
-Provide your assessment as a JSON object with "scam", "confidence", and "reason". If an error occurred during SSL check or certificate retrieval, or if there's no certificate, factor that heavily into your reason.
