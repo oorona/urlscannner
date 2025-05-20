@@ -1,104 +1,100 @@
-# Discord Link Scanner Bot
+# Discord Link Scanner Bot: Advanced AI-Powered URL Analysis
 
-This Discord bot automatically scans messages in a server for URLs. It uses a sophisticated analysis library (`url_analyzer.py`) to check if the links exhibit characteristics of scams or malicious sites. If a link is deemed suspicious based on a configurable threshold, the bot takes predefined actions.
+This Discord bot **leverages Artificial Intelligence, specifically Large Language Models (LLMs)**, to automatically scan messages for URLs and perform a deep, multi-faceted analysis to determine if they are malicious or part of a scam. Unlike traditional scanners that rely solely on blocklists or simple heuristics, this bot employs a **configurable pipeline of AI-driven assessment steps**. Each piece of information gathered about a URL (such as its string structure, DNS records, WHOIS data, SSL certificate validity, and even page content via headless Browse) can be individually assessed by an LLM. Finally, a **"Decider" LLM synthesizes all these AI-powered insights** to make a holistic judgment on the URL's safety.
 
-## Features
+If a link is flagged as suspicious by this comprehensive AI analysis, the bot takes configurable actions such as alerting moderators, notifying users, and assigning roles.
 
-*   Monitors all messages in the servers it's added to.
-*   Detects URLs within message content.
-*   Analyzes detected URLs using multiple checks (URL structure, reachability, DNS, SSL, WHOIS, page content extraction via headless browser).
-*   Flags links as suspicious based on a configurable risk threshold.
-*   **Adds Reactions:** Adds ✅ to messages with analyzed, non-suspicious links and 🚨 to messages with suspicious links.
-*   **Sends Detailed Alerts:** Posts an alert message to a specific moderator channel when a suspicious link is found, **including the full JSON analysis report as an attachment**.
-*   Notifies designated users via Direct Message about suspicious links.
-*   Assigns a specific role to the user who posted the suspicious link.
-*   Configurable via a `.env` file.
-*   Uses `discord.py` Cogs for organization.
-*   Clean startup structure (`main.py` -> `bot.py` -> cogs).
+## Core Features
+
+* **AI-Driven Analysis Pipeline:**
+    * **Multi-Step LLM Assessment:** Analyzes URLs through a configurable sequence of steps. Each step gathers data (URL structure, reachability, DNS, WHOIS, SSL, optional page content via Playwright) and then uses a dedicated Large Language Model (LLM) with a tailored prompt to assess that specific aspect for scam indicators.
+    * **"Final Decider" LLM:** After individual AI assessments, a final LLM synthesizes all findings to provide an overall scam classification (YES/NO) and confidence level (LOW/MEDIUM/HIGH) for the URL.
+    * **Configurable & Modular:** The analysis pipeline, including which steps are run, their data sources, and the LLM prompts used, is defined in an external YAML file (`urlanalysis/analysis_pipeline_config.yaml`). Prompts for each LLM interaction are stored in separate, easily editable text files.
+* **Discord Integration:**
+    * Monitors all messages in servers it's added to.
+    * Detects URLs within message content.
+    * **Adds Reactions:** Adds ✅ (safe), 🚨 (suspicious), 💾 (cache hit), or ⚠️ (error) to messages based on the AI analysis outcome.
+* **Alerting & Reporting:**
+    * **Sends Detailed Alerts:** Posts an alert to a moderator channel for suspicious links, including the AI's reasoning and confidence.
+    * **Attaches Full Analysis JSON:** If a link is deemed a scam by the AI, a comprehensive JSON report detailing all gathered data and individual AI step assessments is attached to the alert.
+    * Notifies designated users via Direct Message.
+* **User Actions:**
+    * Assigns a specific role to users posting suspicious links.
+    * Replies to the original message with a warning.
+* **Performance & Scalability:**
+    * Uses Redis for efficient caching of AI analysis results, reducing redundant processing.
+    * Asynchronous operations for non-blocking performance.
+* **Configuration:** Highly configurable via a `.env` file (for secrets and environment settings like API keys, Redis DSN) and the `analysis_pipeline_config.yaml` (for the AI analysis workflow).
+* **Technology:** Built with Python, `discord.py`, `httpx` for LLM communication, Playwright for web interaction, and various network analysis libraries.
+
+## How the AI Determines Suspicion
+
+The bot's intelligence lies in its `url_analyzer.py` module and the configured AI pipeline:
+
+1.  **Configuration Loading:** The `analysis_pipeline_config.yaml` file dictates the entire analysis flow. It specifies each step, what data to gather (e.g., DNS, WHOIS), and which prompt file to use for LLM assessment of that data.
+2.  **Initial Checks:** A URL reachability check is performed early.
+3.  **Sequential AI Assessment:** For each enabled step in the pipeline:
+    * Relevant data is collected (e.g., SSL certificate details).
+    * This data is formatted into a specific prompt (loaded from `urlanalysis/prompts/`).
+    * An LLM (configured via `.env`) assesses this information and returns a structured JSON response indicating if *this specific aspect* appears scam-like, along with confidence and reasoning.
+4.  **"Final Decider" LLM:** Once all individual AI assessment steps are complete, their outputs, along with the reachability status, are summarized and presented to a final "Decider" LLM. This LLM uses a master prompt to evaluate the totality of the evidence and make the ultimate call on whether the URL is a scam, providing an overall confidence level and a summary reason.
+5.  **Action Trigger:** The Discord bot cog then uses this final AI judgment to take appropriate actions (reactions, alerts, etc.).
+
+This layered AI approach allows for a nuanced and context-aware analysis, going beyond simple pattern matching.
 
 ## Prerequisites
 
-*   Python 3.8+
-*   `pip` (Python package installer)
-*   Access to a Discord server where you have permissions to add bots and manage roles/channels.
-*   A Discord Bot Token.
+* Python 3.9+
+* `pip` (Python package installer)
+* Access to a Discord server where you have permissions to add bots and manage roles/channels.
+* A Discord Bot Token.
+* **Access to an LLM API:** Configured to be compatible with OpenAI's API structure (e.g., Ollama with an appropriate model, OpenWebUI, or other commercial/private LLMs). This includes an API key/token and the correct API endpoint URL.
+* **Redis Instance:** A running Redis server for caching analysis results.
+* (Optional but Recommended) Docker and Docker Compose for containerized deployment.
 
 ## Installation
 
 1.  **Clone the repository or download the files:**
     ```bash
     git clone <repository_url> # Or download and extract the ZIP
-    cd discord-link-scanner
+    cd discord-link-scanner-ai
     ```
 
-2.  **Install Python dependencies:**
+2.  **Create and Configure `.env` file:**
+    * Copy `.env.example` to `.env`.
+    * Fill in all required values:
+        * `DISCORD_BOT_TOKEN`
+        * Discord Channel/Role/User IDs (`SUSPICIOUS_CHANNEL_ID`, `NOTIFY_USER_IDS`, `SUSPICIOUS_ROLE_ID`)
+        * **LLM API Details:** `OPENWEBUI_TOKEN`, `OPENWEBUI_URL` (base URL, e.g., `http://localhost:11434`), `OPENWEBUI_LLM_MODEL` (e.g., `mistral:latest`).
+        * **Redis Details:** `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD` (if any).
+
+3.  **Configure the AI Analysis Pipeline:**
+    * Review and customize `urlanalysis/analysis_pipeline_config.yaml` to define your desired analysis steps, enable/disable them, and set their corresponding prompt files.
+    * Edit the prompt files in `urlanalysis/prompts/` to tailor the AI's behavior for each step and the final decision. **This is critical for accuracy.**
+
+4.  **Install Python dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
 
-3.  **Install Playwright browsers:** (Required by `url_analyzer.py`)
+5.  **Install Playwright browsers** (if any Playwright-dependent steps are enabled):
     ```bash
     python -m playwright install
     ```
 
-## Configuration
+## Required Bot Permissions (Discord)
 
-1.  **Create a `.env` file** in the root directory by copying `.env.example` or creating it manually.
+* View Channels
+* Send Messages
+* Read Message History
+* Manage Roles
+* Embed Links
+* Attach Files (for detailed AI analysis reports)
+* Add Reactions
 
-2.  **Edit the `.env` file** and fill in the required values:
-    *   `DISCORD_BOT_TOKEN`: Your unique bot token.
-    *   `SUSPICIOUS_CHANNEL_ID`: Numerical ID of the moderator alert channel.
-    *   `NOTIFY_USER_IDS`: Comma-separated list of numerical User IDs for DM alerts.
-    *   `SUSPICIOUS_ROLE_ID`: Numerical ID of the role to assign.
-    *   `SUSPICION_THRESHOLD`: Integer (e.g., `3`) defining the number of risk flags needed to trigger actions.
-
-## Required Bot Permissions
-
-When inviting your bot, ensure it has these permissions:
-
-*   **View Channels**
-*   **Send Messages**
-*   **Read Message History**
-*   **Manage Roles**
-*   **Embed Links**
-*   **Attach Files:** Required to send the JSON analysis report.
-*   **Add Reactions:** Required to react to messages with ✅ or 🚨.
-
-**Important:** Enable the **Message Content Intent**, **Server Members Intent**, and potentially the **Presence Intent** (if using presence) for your bot in the Discord Developer Portal.
+**Important:** Enable **Message Content Intent**, **Server Members Intent**, and **Guilds Intent** for your bot in the Discord Developer Portal.
 
 ## Running the Bot
 
 ```bash
 python main.py
-```
-
-
-## How Suspicion is Determined
-
-The bot uses the url_analyzer.py library, which performs several checks:
-
-*    **URL Structure**: Looks for typosquatting, deceptive subdomains, IP addresses instead of domains, risky TLDs, Punycode.
-
-*    **Reachability**: Checks if the URL is live and gets the final status code after redirects.
-
-*    **DNS Records**: Fetches A, AAAA, MX, NS, TXT records.
-
-*    **SSL Certificate**: Validates the certificate, checks expiry, hostname match, and issuer.
-
-*    **WHOIS Info**: Retrieves domain registration details (creation date, registrar, status). Flags recently registered domains.
-
-*    **Page Content**: Uses a headless browser (Playwright) to visit the page (carefully!) and extracts title, meta tags, links, scripts, forms, and a text preview. Checks for insecure password forms.
-
-The analyze_url function returns a JSON report summarizing these findings, including a list called potential_risks. The bot compares the number of risks in this list to the SUSPICION_THRESHOLD set in your .env file. If the count meets or exceeds the threshold, the link is flagged.
-
-## Disclaimer
-
-This bot is a tool to assist in identifying potentially harmful links. It is not foolproof.
-
-*    **False Positives**: Legitimate links might occasionally be flagged.
-
-*    **False Negatives**: Malicious links might evade detection.
-
-*    **Resource Intensive**: Analyzing links, especially using the headless browser, can consume CPU and RAM. Monitor performance.
-
-*    **Security**: Analyzing unknown links inherently carries some risk, although Playwright runs browsers in a sandboxed environment. Run the bot on a secure system.

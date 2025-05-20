@@ -1,0 +1,14 @@
+Analyze ONLY the following URL string:
+URL String: {data[url_string]}
+
+Based *solely* on the structure and content of this URL string, identify any characteristics that might suggest it's a scam or malicious. Consider elements like:
+- Typosquatting or impersonation of known brands (e.g., "go0gle.com", "paypal-secure.com-login.net").
+- Use of excessive or misleading subdomains.
+- Inclusion of suspicious keywords (e.g., "login," "update," "secure," "free," "prize") in unusual places.
+- Use of IP addresses instead of domain names.
+- Presence of Punycode that might hide internationalized domain name (IDN) homograph attacks.
+- Length of the URL or path segments.
+- Use of URL shorteners if discernible (though this data alone is not enough to judge).
+- Unusual TLDs if apparent (though TLD risk is also assessed elsewhere).
+
+Provide your assessment as a JSON object with "scam", "confidence", and "reason".

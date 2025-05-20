@@ -1,0 +1,62 @@
+# urlanalysis/analysis_pipeline_config.yaml
+
+llm_settings:
+  api_token_env_var: "OPENWEBUI_TOKEN"
+  api_url_env_var: "OPENWEBUI_URL"
+  api_url_path: "/api/chat/completions"
+  model_env_var: "OPENWEBUI_LLM_MODEL"
+  default_temperature: 0.1
+
+default_step_system_prompt_file: "default_step_system_prompt.txt"
+
+playwright_settings:
+  enable_assessment_step: false # Overall toggle for Playwright in pipeline
+  enable_for_final_report_if_scam: true
+  timeout_seconds: 25
+
+analysis_steps:
+  - step_name: "reachability_check"
+    enabled: true
+    data_source_method: "check_url_reachability"
+    scope: "url"
+    execution_modes: ["domain", "full_url"] # Always run for the specific URL
+
+  - step_name: "url_string_assessment"
+    enabled: true
+    data_source_method: "_get_raw_url_for_llm"
+    prompt_file: "url_string_assessment_prompt.txt"
+    scope: "url"
+    execution_modes: ["full_url"] # Only for full_url mode
+
+  - step_name: "dns_records_assessment"
+    enabled: true
+    data_source_method: "check_dns_records"
+    prompt_file: "dns_records_assessment_prompt.txt"
+    scope: "domain"
+    execution_modes: ["domain", "full_url"] # Always run for domain
+
+  - step_name: "whois_info_assessment"
+    enabled: true
+    data_source_method: "check_whois_information"
+    prompt_file: "whois_info_assessment_prompt.txt"
+    scope: "domain"
+    execution_modes: ["domain", "full_url"] # Always run for domain
+
+  - step_name: "ssl_certificate_assessment"
+    enabled: true
+    data_source_method: "check_ssl_certificate"
+    prompt_file: "ssl_certificate_assessment_prompt.txt"
+    scope: "domain"
+    execution_modes: ["domain", "full_url"] # Always run for domain
+
+  - step_name: "page_content_assessment"
+    # This step's enablement is also tied to playwright_settings.enable_assessment_step
+    # If playwright_settings.enable_assessment_step is false, this step won't run regardless of execution_modes.
+    enabled_config_key: "playwright_settings.enable_assessment_step"
+    data_source_method: "extract_page_elements"
+    prompt_file: "page_content_assessment_prompt.txt"
+    scope: "url"
+    execution_modes: ["full_url"] # Only for full_url mode when playwright is enabled
+
+final_assessment_llm:
+  prompt_file: "final_decider_assessment_prompt.txt"

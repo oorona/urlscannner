@@ -1,0 +1,15 @@
+Analyze the following DNS records for the domain '{data[domain]}':
+DNS Records (JSON):
+{data[records_json_str]}
+Error during DNS lookup (if any): {data[error]}
+
+Based *solely* on these DNS records (or lack thereof), identify any characteristics that might suggest the associated domain is used for scams or malicious purposes. Consider:
+- Lack of common records (e.g., no MX records for a domain claiming to be a business).
+- Use of free or dynamic DNS services for critical infrastructure.
+- Recently changed A or NS records.
+- TXT records associated with known malicious campaigns or very low-reputation services.
+- CNAME records pointing to suspicious or newly registered domains.
+- TTL values (very short TTLs can sometimes be indicative of fast flux DNS).
+- Presence of specific SPF/DKIM/DMARC records (or lack thereof if impersonating a known brand).
+
+Provide your assessment as a JSON object with "scam", "confidence", and "reason". If an error occurred during DNS lookup, factor that into your reason.

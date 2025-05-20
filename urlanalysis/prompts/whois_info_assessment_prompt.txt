@@ -1,0 +1,15 @@
+Analyze the following WHOIS information for the domain '{data[domain]}':
+Parsed WHOIS Data (JSON):
+{data[parsed_json_str]}
+Locally identified WHOIS analysis flags: {data[analysis_flags]}
+Error during WHOIS lookup (if any): {data[error]}
+
+Based *solely* on this WHOIS data, identify any characteristics that might suggest the domain is used for scams or malicious purposes. Consider:
+- Domain registration date (e.g., very recently registered, especially if combined with other factors).
+- Domain expiry date (e.g., registered for the minimum possible period).
+- Registrar information (some registrars are more commonly used by malicious actors, or if it's an unusual registrar).
+- Registrant, admin, tech contact information (e.g., use of privacy protection services, inconsistencies, or details matching known malicious actors if such external info were available - focus on what's provided).
+- Domain status (e.g., "clientHold", "serverHold", "redemptionPeriod" can be suspicious).
+- Name server changes or history if available.
+
+Provide your assessment as a JSON object with "scam", "confidence", and "reason". If an error occurred during WHOIS lookup or if data is severely limited (e.g., due to privacy services), factor that into your reason.

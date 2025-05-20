@@ -1,0 +1,134 @@
+# Project: Discord Link Scanner Bot with Advanced AI Analysis
+
+## 1. Purpose
+A Discord bot that automatically scans messages for URLs and employs a sophisticated, **AI-driven multi-step analysis pipeline** to determine if a URL is malicious or part of a scam. Each step in the pipeline can involve **Large Language Model (LLM) assessment** of specific URL characteristics (like its structure, DNS records, WHOIS information, and SSL certificate). A final **"Decider" LLM** then synthesizes these individual AI-powered assessments to make an overall judgment on the URL's safety. The bot takes predefined actions based on this comprehensive AI analysis and uses Redis for caching results.
+
+## 2. Core Features
+    - Monitors messages in all servers the bot is part of.
+    - Detects URLs within message content using regular expressions.
+    - **Advanced AI-Powered Multi-Step URL Analysis Pipeline (via `url_analyzer.py`):**
+        - **Configurable Pipeline:** Analysis steps, their order, data sources, LLM prompt files, and enabled status are defined in a YAML file (`urlanalysis/analysis_pipeline_config.yaml`).
+        - **Modular LLM Prompts:** Prompts for each distinct AI analysis step and the final "Decider" LLM are loaded from individual text files located in `urlanalysis/prompts/`.
+        - **Individual AI Analysis Steps:** Each enabled step in the pipeline gathers specific data about the URL (e.g., DNS records, WHOIS info) and then passes this data to an LLM for a targeted assessment.
+            - **Data Gathering Methods:**
+                - URL Reachability Check (`check_url_reachability`): Early check for URL accessibility; data provided to the final decider LLM.
+                - Raw URL String Analysis (for LLM assessment of the URL's textual structure).
+                - DNS Record Fetching (`check_dns_records`) and subsequent LLM assessment.
+                - WHOIS Information Retrieval (`check_whois_information`) and subsequent LLM assessment.
+                - SSL Certificate Validation (`check_ssl_certificate`) and subsequent LLM assessment.
+                - Page Content Extraction (Playwright via `extract_page_elements`): Conditionally run based on YAML configuration; data can be fed to an LLM as part of the assessment pipeline or used solely for final report generation if a scam is detected.
+            - **Per-Step AI (LLM) Assessment:** For each configured step involving an LLM, after data is gathered, an LLM is called with a specific, tailored prompt. The LLM returns a JSON object: `{"scam": "YES"/"NO", "confidence": "LOW"/"MEDIUM"/"HIGH", "reason": "..."}` for that particular aspect of the URL.
+        - **Holistic Final Assessment ("Final Decider" AI):**
+            - After all configured individual LLM assessment steps are completed, a summary of these findings (including reachability data) is passed to a final "Decider" LLM.
+            - This "Decider" LLM uses a dedicated prompt (from a file) to synthesize all prior information and provide an overall `is_scam` status (YES/NO), an `overall_confidence` (LOW/MEDIUM/HIGH), and an `overall_reason` for the URL, representing the tool's final AI-driven judgment.
+    - **Redis Caching:**
+        - Comprehensive AI analysis results (the full JSON output from the holistic assessment pipeline) are cached in a Redis database to avoid re-analyzing known URLs.
+        - Redis connection details are configured via environment variables.
+    - **Action on Messages (via `link_scanner_cog.py`):**
+        - The cog calls the main AI assessment method in `url_analyzer.py`.
+        - Uses the final `is_scam` and `overall_confidence` from the analyzer's AI-driven response to determine actions.
+        - Adds a ✅ reaction to messages with non-suspicious links (based on final AI assessment).
+        - Adds a 🚨 reaction to messages with suspicious links.
+        - Adds a 💾 reaction if a URL's analysis is served from the Redis cache.
+        - Adds a ⚠️ reaction if an error occurs during analysis.
+    - **Alerting and Notifications (if overall AI assessment is `is_scam` is TRUE):**
+        - Sends a detailed alert message to a configurable moderator channel.
+            - Alert includes suspicious URL, poster, channel, and the overall reason from the "Final Decider" LLM.
+            - **Conditional Full Analysis Report:** If the URL is deemed a scam by the AI, a comprehensive JSON report (including data from all executed steps, potentially Playwright data if enabled) is generated and attached to the alert message.
+        - Notifies designated users via Direct Message.
+    - **User Moderation (if overall AI assessment is `is_scam` is TRUE):**
+        - Assigns a configurable role to the user who posted the suspicious link.
+        - Sends a DM to the user about the role assignment.
+        - Replies to the message containing the suspicious link with a warning embed.
+    - **Configuration (Environment Variables & YAML):**
+        - `.env` file for: Discord Bot Token, Moderator Alert Channel ID, User IDs for DM Alerts, Suspicious Role ID, LLM API credentials (token, URL, model), Redis connection details (host, port, DB, password).
+        - `urlanalysis/analysis_pipeline_config.yaml` for defining the AI analysis steps, LLM prompt file paths, data source methods, LLM settings overrides, and conditional feature flags (e.g., Playwright).
+    - **Organization and Structure:**
+        - Uses `discord.py` Cogs for modular code (`LinkScannerCog`).
+        - Clean startup structure: `main.py` -> `bot.py` -> cogs.
+        - Graceful shutdown handling for the bot.
+    - **Logging:** Comprehensive logging to console and `bot.log` file, with detailed debug statements for the AI analysis pipeline steps, data gathering, and LLM interactions.
+    - **Containerization:** Includes a `docker-compose.yaml` for Docker deployment.
+
+## 3. Technical Stack
+    - Python 3.8+
+    - discord.py library
+    - **Large Language Models (LLMs):** External AI services for assessing URL characteristics and making a final judgment.
+    - Playwright for headless browser interaction
+    - aiohttp for asynchronous HTTP requests
+    - httpx for LLM API calls
+    - dnspython for DNS lookups
+    - python-whois for WHOIS lookups
+    - pyOpenSSL for SSL certificate parsing
+    - tldextract for domain parsing
+    - python-dotenv for environment variable management
+    - PyYAML for parsing `analysis_pipeline_config.yaml`.
+    - Redis (database) and `redis` Python library for caching.
+
+## 4. Key Modules and Files (Updated Structure)
+    - `main.py`: Bot entry point.
+    - `bot.py`: Core bot setup and lifecycle management.
+    - `cogs/link_scanner_cog.py`: Handles message scanning, URL processing using `AsyncURLAnalyzer`, Redis caching, and Discord actions.
+    - `urlanalysis/url_analyzer.py`: `AsyncURLAnalyzer` class performing the multi-step AI-driven analysis.
+    - `urlanalysis/analysis_pipeline_config.yaml`: Configuration for the AI analysis steps and LLM interactions.
+    - `urlanalysis/prompts/`: Directory containing individual text files for LLM prompts.
+    - `urllist_manager.py`: CLI tool for `urllist.json` (may be deprecated or need update for Redis).
+    - `README.md`: Project documentation.
+    - `requirements.txt`: Python dependencies.
+    - `docker-compose.yaml`: Docker configuration.
+    - `.env` / `.env.example`: Environment variable configuration.
+    - `bot.log`: Log file.
+
+## 5. Bot Permissions Required (Discord)
+    - View Channels
+    - Send Messages
+    - Read Message History
+    - Manage Roles
+    - Embed Links
+    - Attach Files (for AI analysis report)
+    - Add Reactions
+
+## 6. Intents Required (Discord Developer Portal)
+    - Message Content Intent
+    - Server Members Intent
+    - Guilds Intent
+    - Reactions Intent
+
+## 7. Workflow for a new message (AI-Driven)
+    1. Bot receives a message.
+    2. Ignores messages from itself or DMs.
+    3. Extracts URLs using regex.
+    4. For each URL:
+        a. Normalize the URL.
+        b. Check Redis for a cached AI assessment result.
+        c. If Cache Hit: Use the cached result. Add 💾 reaction.
+        d. If Cache Miss:
+            i. Call `AsyncURLAnalyzer.get_holistic_url_assessment(url)`. This method orchestrates the AI pipeline:
+                1. Reads `analysis_pipeline_config.yaml`.
+                2. Performs an initial URL reachability check.
+                3. For each enabled analysis step (URL string, DNS, WHOIS, SSL, conditional Playwright):
+                    A. Calls the specified data gathering method.
+                    B. Loads the step-specific LLM prompt from its file.
+                    C. Calls an LLM with the gathered data and tailored prompt, receiving an AI assessment (`{"scam": ..., "confidence": ..., "reason": ...}`) for that specific step.
+                4. After all pipeline steps, prepares a summary of individual AI assessments and reachability data.
+                5. Calls a "Final Decider" LLM with this comprehensive summary and a final assessment prompt.
+                6. Returns a JSON object containing all raw data, individual AI step assessments, and the final overall AI assessment (`overall_is_scam`, `overall_confidence`, `overall_reason`).
+            ii. Store this comprehensive AI assessment result in Redis.
+    5. Based on the `overall_is_scam` and `overall_confidence` from the (cached or new) AI assessment:
+        a. If `overall_is_scam` is TRUE (or meets a defined confidence criterion):
+            i. Add 🚨 reaction.
+            ii. Call `handle_suspicious_link()`:
+                1. Triggers `AsyncURLAnalyzer.generate_full_analysis_report_for_attachment()` to get the detailed JSON string of all data gathered.
+                2. Sends alert to moderator channel with the AI findings and the full report attached.
+                3. DMs specified users.
+                4. Assigns role to message author.
+                5. Replies to the original message with a warning based on the AI assessment.
+        b. Else (not deemed a scam by the AI):
+            i. Add ✅ reaction.
+        c. If an error occurred during analysis:
+            i. Add ⚠️ reaction.
+
+## 8. Error Handling and Logging
+    - Extensive logging to console and `bot.log` for all operations, including detailed logs for each AI analysis pipeline step, data gathering, and LLM interactions within `AsyncURLAnalyzer`.
+    - Robust error handling for failed LLM calls, data gathering issues, Redis operations, and Discord API errors.
+    - Clear error messages for configuration issues (e.g., missing YAML config, prompt files, or .env variables).

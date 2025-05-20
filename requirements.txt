@@ -1,6 +1,6 @@
 # requirements.txt
 
-discord.py>=2.0.0
+discord.py>=2.3.0 # Ensure a recent version
 python-dotenv
 aiohttp
 dnspython
@@ -9,7 +9,6 @@ python-whois
 playwright>=1.30
 tldextract
 ipaddress
-requests # Keep if url_analyzer might use it as fallback
-beautifulsoup4 # Keep if url_analyzer might use it as fallback
-lxml # Keep if url_analyzer might use it as fallback
-httpx
+httpx>=0.25
+PyYAML>=6.0 # For YAML config
+redis>=5.0.0 # For async redis

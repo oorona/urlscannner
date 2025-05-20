@@ -1,0 +1,185 @@
+{
+  "original_url": "http://google.com",
+  "analysis_start_time_utc": "2025-05-16T20:02:24.647182+00:00",
+  "url_components": {
+    "original_url": "http://google.com",
+    "parsed_obj": [
+      "http",
+      "google.com",
+      "",
+      "",
+      "",
+      ""
+    ],
+    "scheme": "http",
+    "netloc": "google.com",
+    "port": 80,
+    "domain_parts": {
+      "full_host": "google.com",
+      "subdomain": null,
+      "domain_name": "google",
+      "tld": "com",
+      "registered_domain": "google.com"
+    },
+    "error": null
+  },
+  "steps_data": {
+    "reachability_check": {
+      "url": "http://google.com",
+      "reachable": true,
+      "status_code": 200,
+      "final_url": "https://www.google.com/?gws_rd=ssl",
+      "error": null,
+      "headers": {
+        "Date": "Fri, 16 May 2025 20:02:26 GMT",
+        "Expires": "-1",
+        "Cache-Control": "private, max-age=0",
+        "Content-Type": "text/html; charset=UTF-8",
+        "Strict-Transport-Security": "max-age=31536000",
+        "Content-Security-Policy-Report-Only": "object-src 'none';base-uri 'self';script-src 'nonce-bgfAIr_BN7ZFVBYa48L1fw' 'strict-dynamic' 'report-sample' 'unsafe-eval' 'unsafe-inline' https: http:;report-uri https://csp.withgoogle.com/csp/gws/other-hp",
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups; report-to=\"gws\"",
+        "Report-To": "{\"group\":\"gws\",\"max_age\":2592000,\"endpoints\":[{\"url\":\"https://csp.withgoogle.com/csp/report-to/gws/other\"}]}",
+        "Accept-CH": "Sec-CH-Prefers-Color-Scheme",
+        "Permissions-Policy": "unload=()",
+        "P3P": "CP=\"This is not a P3P policy! See g.co/p3phelp for more info.\"",
+        "Content-Encoding": "br",
+        "Server": "gws",
+        "Content-Length": "50771",
+        "X-XSS-Protection": "0",
+        "X-Frame-Options": "SAMEORIGIN",
+        "Set-Cookie": "NID=524=WZlVJP_LIUsM1IRYvjZ_zKc5-pUftiG14sVzVmUBzgmQ566BDqrJsU4lC3KKkQoGiIsGhDppk8RWYGKdGiNen0yjb2GhPa7citf0VhueFcMQ10CPlj635_JA4Diq1AWQU8VBr8lbM-VDUfU2fSCoGsVtaP3ic1EthcOdVRyByzNUggMQENS1m6nWhVGbiinclY2vcMa8o34vtN3TpwqluLk; expires=Sat, 15-Nov-2025 20:02:26 GMT; path=/; domain=.google.com; Secure; HttpOnly; SameSite=none",
+        "Alt-Svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      }
+    },
+    "url_string_assessment": {
+      "url_string": "http://google.com"
+    },
+    "dns_records_assessment": {
+      "domain": "google.com",
+      "records": {
+        "A": [
+          "142.250.72.78"
+        ],
+        "AAAA": [
+          "2607:f8b0:400f:807::200e"
+        ],
+        "MX": [
+          "10 smtp.google.com."
+        ],
+        "NS": [
+          "ns1.google.com.",
+          "ns2.google.com.",
+          "ns3.google.com.",
+          "ns4.google.com."
+        ],
+        "TXT": [
+          "[ERROR_QUERYING_DNS_TXT: NameError]"
+        ]
+      },
+      "error": null,
+      "records_json_str": "{\"A\": [\"142.250.72.78\"], \"AAAA\": [\"2607:f8b0:400f:807::200e\"], \"MX\": [\"10 smtp.google.com.\"], \"NS\": [\"ns1.google.com.\", \"ns2.google.com.\", \"ns3.google.com.\", \"ns4.google.com.\"], \"TXT\": [\"[ERROR_QUERYING_DNS_TXT: NameError]\"]}"
+    },
+    "whois_info_assessment": {
+      "domain": "google.com",
+      "parsed": {
+        "domain_name": "GOOGLE.COM",
+        "registrar": "MarkMonitor, Inc.",
+        "registrar_url": "http://www.markmonitor.com",
+        "reseller": null,
+        "whois_server": "whois.markmonitor.com",
+        "referral_url": null,
+        "updated_date": [
+          "2019-09-09T15:39:04",
+          "2024-08-02T02:17:33+00:00"
+        ],
+        "creation_date": [
+          "1997-09-15T04:00:00",
+          "1997-09-15T07:00:00+00:00"
+        ],
+        "expiration_date": [
+          "2028-09-13T07:00:00+00:00",
+          "2028-09-14T04:00:00"
+        ],
+        "name_servers": [
+          "NS1.GOOGLE.COM",
+          "NS2.GOOGLE.COM",
+          "NS3.GOOGLE.COM",
+          "NS4.GOOGLE.COM"
+        ],
+        "status": [
+          "clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited",
+          "clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
+          "clientUpdateProhibited https://icann.org/epp#clientUpdateProhibited",
+          "serverDeleteProhibited https://icann.org/epp#serverDeleteProhibited",
+          "serverTransferProhibited https://icann.org/epp#serverTransferProhibited",
+          "serverUpdateProhibited https://icann.org/epp#serverUpdateProhibited",
+          "clientUpdateProhibited (https://www.icann.org/epp#clientUpdateProhibited)",
+          "clientTransferProhibited (https://www.icann.org/epp#clientTransferProhibited)",
+          "clientDeleteProhibited (https://www.icann.org/epp#clientDeleteProhibited)",
+          "serverUpdateProhibited (https://www.icann.org/epp#serverUpdateProhibited)",
+          "serverTransferProhibited (https://www.icann.org/epp#serverTransferProhibited)",
+          "serverDeleteProhibited (https://www.icann.org/epp#serverDeleteProhibited)"
+        ],
+        "emails": [
+          "abusecomplaints@markmonitor.com",
+          "whoisrequest@markmonitor.com"
+        ],
+        "dnssec": "unsigned",
+        "name": null,
+        "org": "Google LLC",
+        "address": null,
+        "city": null,
+        "state": "CA",
+        "registrant_postal_code": null,
+        "country": "US"
+      },
+      "error": null,
+      "analysis_flags": [],
+      "parsed_json_str": "{\"domain_name\": \"GOOGLE.COM\", \"registrar\": \"MarkMonitor, Inc.\", \"registrar_url\": \"http://www.markmonitor.com\", \"reseller\": null, \"whois_server\": \"whois.markmonitor.com\", \"referral_url\": null, \"updated_date\": [\"2019-09-09T15:39:04\", \"2024-08-02T02:17:33+00:00\"], \"creation_date\": [\"1997-09-15T04:00:00\", \"1997-09-15T07:00:00+00:00\"], \"expiration_date\": [\"2028-09-13T07:00:00+00:00\", \"2028-09-14T04:00:00\"], \"name_servers\": [\"NS1.GOOGLE.COM\", \"NS2.GOOGLE.COM\", \"NS3.GOOGLE.COM\", \"NS4.GOOGLE.COM\"], \"status\": [\"clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited\", \"clientTransferProhibited https://icann.org/epp#clientTransferProhibited\", \"clientUpdateProhibited https://icann.org/epp#clientUpdateProhibited\", \"serverDeleteProhibited https://icann.org/epp#serverDeleteProhibited\", \"serverTransferProhibited https://icann.org/epp#serverTransferProhibited\", \"serverUpdateProhibited https://icann.org/epp#serverUpdateProhibited\", \"clientUpdateProhibited (https://www.icann.org/epp#clientUpdateProhibited)\", \"clientTransferProhibited (https://www.icann.org/epp#clientTransferProhibited)\", \"clientDeleteProhibited (https://www.icann.org/epp#clientDeleteProhibited)\", \"serverUpdateProhibited (https://www.icann.org/epp#serverUpdateProhibited)\", \"serverTransferProhibited (https://www.icann.org/epp#serverTransferProhibited)\", \"serverDeleteProhibited (https://www.icann.org/epp#serverDeleteProhibited)\"], \"emails\": [\"abusecomplaints@markmonitor.com\", \"whoisrequest@markmonitor.com\"], \"dnssec\": \"unsigned\", \"name\": null, \"org\": \"Google LLC\", \"address\": null, \"city\": null, \"state\": \"CA\", \"registrant_postal_code\": null, \"country\": \"US\"}"
+    },
+    "ssl_certificate_assessment": {
+      "error": "Skipped SSL check for non-HTTPS scheme",
+      "details": {}
+    }
+  },
+  "steps_llm_assessments": {
+    "url_string_assessment": {
+      "scam": "NO",
+      "confidence": "HIGH",
+      "reason": "The URL is a standard, well-known domain without typosquatting, suspicious keywords, unusual subdomains, or other common scam indicators."
+    },
+    "dns_records_assessment": {
+      "scam": "NO",
+      "confidence": "HIGH",
+      "reason": "The DNS records for google.com show valid A, AAAA, MX, and NS records consistent with a legitimate, well-established domain; the TXT record error likely indicates a query issue rather than malicious intent."
+    },
+    "whois_info_assessment": {
+      "scam": "NO",
+      "confidence": "HIGH",
+      "reason": "The domain is long-established since 1997, registered with a reputable registrar (MarkMonitor, Inc.), has multiple protective status flags, and is owned by a well-known organization (Google LLC), all indicating legitimacy and no signs of malicious use."
+    },
+    "ssl_certificate_assessment": {
+      "info": "Skipped due to data error",
+      "underlying_error": "Skipped SSL check for non-HTTPS scheme"
+    }
+  },
+  "errors_encountered": [
+    {
+      "step": "ssl_certificate_assessment",
+      "type": "data_error",
+      "message": "Skipped SSL check for non-HTTPS scheme"
+    }
+  ],
+  "final_llm_assessment": {
+    "overall_is_scam": "NO",
+    "overall_confidence": "HIGH",
+    "overall_reason": "The URL is a well-known, long-established domain with valid DNS records and ownership by a reputable organization. All assessments indicate legitimacy with no signs of malicious activity or scam indicators. Minor issues such as the TXT record query error do not outweigh the strong positive signals from other analyses."
+  },
+  "assessment_summary": {
+    "overall_is_scam": "NO",
+    "overall_confidence": "HIGH",
+    "overall_reason": "The URL is a well-known, long-established domain with valid DNS records and ownership by a reputable organization. All assessments indicate legitimacy with no signs of malicious activity or scam indicators. Minor issues such as the TXT record query error do not outweigh the strong positive signals from other analyses."
+  },
+  "analysis_duration_seconds": 15.3,
+  "analysis_end_time_utc": "2025-05-16T20:02:39.938612+00:00"
+}

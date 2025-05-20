@@ -1,0 +1,19 @@
+Analyze the following summarized page content extracted from URL '{data[url]}':
+Page Title: {data[title]}
+Final URL after redirects: {data[final_url]}
+Meta Description: {data[meta_description]}
+Number of Forms: {data[forms_count]}
+Number of External Scripts: {data[scripts_count]}
+Number of External Links: {data[links_count]}
+Text Preview (first 200 characters): "{data[text_preview_200]}"
+Content Extraction Error (if any): {data[error]}
+
+Based *solely* on this summarized page content, identify any characteristics that might suggest the page is part of a scam or malicious activity (e.g., phishing, malware distribution). Consider:
+- Urgency or alarmist language in the title or text preview.
+- Requests for sensitive information (implied by forms, even if input fields aren't detailed here).
+- Generic or unprofessional-looking text/title.
+- Mismatch between the original URL and the final URL if significant.
+- A high number of external scripts or links on a simple page.
+- If the page content is very minimal or seems like a placeholder.
+
+Provide your assessment as a JSON object with "scam", "confidence", and "reason".

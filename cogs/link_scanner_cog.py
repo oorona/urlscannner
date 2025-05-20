@@ -1,453 +1,386 @@
 # cogs/link_scanner_cog.py
-
 import discord
 from discord.ext import commands
 import os
 import re
 import json
 import logging
-import io # Required for file attachment
-from typing import List, Optional, Tuple, Dict, Any # Added Dict, Any
-from urllib.parse import urlparse # Needed for normalization
-from urlanalysis.url_analyzer import AsyncURLAnalyzer # Assuming this is the correct import path
+import io
+from typing import Dict, Any, Optional,Tuple
+
+from urllib.parse import urlparse
+
+# Corrected Redis imports
+import redis.asyncio as aioredis 
+from redis import exceptions as RedisExceptions
 
 
-logger = logging.getLogger('discord.scanner') # Specific logger for the scanner
+# Ensure the import path is correct based on your project structure
+try:
+    from urlanalysis.url_analyzer import AsyncURLAnalyzer
+except ImportError:
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from urlanalysis.url_analyzer import AsyncURLAnalyzer
+
+
+logger = logging.getLogger('discord.scanner.cog')
 
 # --- Constants for Reactions ---
-REACTION_SUSPICIOUS = '🚨' # Police car light emoji
-REACTION_SAFE = '✅'       # Check mark button emoji
-REACTION_CACHE = '💾'      # Floppy disk emoji for cache hit
-URLLIST_FILENAME = "urllist.json" # Cache filename
+REACTION_SUSPICIOUS = '🚨'
+REACTION_SAFE = '✅'
+REACTION_CACHE = '💾'
+REACTION_ERROR = '⚠️'
+
+# Cache settings
+FULL_URL_CACHE_PREFIX = "urlscan:full_assessment_cache:"
+DOMAIN_CACHE_PREFIX = "urlscan:domain_assessment_cache:"
+DEFAULT_CACHE_EXPIRY_SECONDS = 60 * 60 * 24 * 7 # 7 days
 
 class LinkScannerCog(commands.Cog):
-    """
-    Cog responsible for scanning messages for links, analyzing them using cache
-    and external analyzer, taking action based on the analysis, and optionally
-    using an LLM for classification (if configured in the analyzer).
-    """
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # Instantiate the analyzer - it will load its own config from .env
-        self.analyzer = AsyncURLAnalyzer()
-        # Load Discord-specific config from .env
+        
+        self.analysis_mode = os.getenv("ANALYSIS_MODE", "domain").lower()
+        logger.info(f"LinkScannerCog initialized with ANALYSIS_MODE: {self.analysis_mode}")
+
+        self.redis_client: Optional[aioredis.Redis] = None
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        redis_port = int(os.getenv("REDIS_PORT", "6379"))
+        redis_db = int(os.getenv("REDIS_DB", "0"))
+        redis_password_from_env = os.getenv("REDIS_PASSWORD")
+        self.redis_password_to_use = redis_password_from_env if redis_password_from_env else None
+        try:
+            self.redis_client = aioredis.Redis(
+                host=redis_host, port=redis_port, db=redis_db, 
+                password=self.redis_password_to_use, decode_responses=False
+            )
+            logger.info(f"Cog Redis client configured for {redis_host}:{redis_port}. Password used: {'Yes' if self.redis_password_to_use else 'No'}")
+        except Exception as e:
+            logger.error(f"Cog failed to initialize Redis client: {e}. Caching will be unavailable.", exc_info=True)
+            self.redis_client = None
+
+        self.analyzer = AsyncURLAnalyzer(redis_client=self.redis_client) 
+
         self.suspicious_channel_id = int(os.getenv("SUSPICIOUS_CHANNEL_ID", "0"))
         self.suspicious_role_id = int(os.getenv("SUSPICIOUS_ROLE_ID", "0"))
-        self.notify_user_ids = [int(uid.strip()) for uid in os.getenv("NOTIFY_USER_IDS", "").split(',') if uid.strip()]
-        self.suspicion_threshold = int(os.getenv("SUSPICION_THRESHOLD", "3"))
-
-        # Basic URL regex
-        self.url_regex = re.compile(r'(?:https?://|www\.)[^\s<>"]+|https?://[^\s<>"]+')
-
-        # --- Load URL Cache ---
-        self.url_cache: Dict[str, Dict[str, Any]] = self._load_cache()
-        logger.info(f"Loaded {len(self.url_cache)} URLs from cache file '{URLLIST_FILENAME}'.")
-
-        # --- Initialization Checks (Log potential issues) ---
-        if not self.suspicious_channel_id:
-            logger.error("SUSPICIOUS_CHANNEL_ID is not set or invalid in .env file! Alerts disabled.")
-        if not self.suspicious_role_id:
-            logger.error("SUSPICIOUS_ROLE_ID is not set or invalid in .env file! Role assignment disabled.")
-        if not self.notify_user_ids:
-            logger.warning("NOTIFY_USER_IDS is not set or empty in .env file. No users will be DMed.")
-
-        logger.info(f"LinkScannerCog loaded. Alert Channel: {self.suspicious_channel_id}, Role: {self.suspicious_role_id}, Threshold: {self.suspicion_threshold}")
-        logger.info(f"Reactions: Safe='{REACTION_SAFE}', Suspicious='{REACTION_SUSPICIOUS}', Cache='{REACTION_CACHE}'")
-
-    # --- Cache Handling Methods ---
-    def _load_cache(self) -> Dict[str, Dict[str, Any]]:
-        """Loads the URL cache from the JSON file."""
-        if os.path.exists(URLLIST_FILENAME):
+        self.notify_user_ids_str = os.getenv("NOTIFY_USER_IDS", "")
+        self.notify_user_ids = []
+        if self.notify_user_ids_str:
             try:
-                with open(URLLIST_FILENAME, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
-                    # Basic validation: ensure it's a dictionary
-                    if isinstance(cache_data, dict):
-                         # Optional: Deeper validation of structure if needed
-                         return cache_data
-                    else:
-                         logger.warning(f"Cache file '{URLLIST_FILENAME}' contained invalid data type ({type(cache_data)}), starting with empty cache.")
-                         return {}
-            except json.JSONDecodeError:
-                logger.error(f"Failed to decode JSON from cache file '{URLLIST_FILENAME}'. Starting with empty cache.", exc_info=True)
-                return {}
-            except IOError as e:
-                logger.error(f"Could not read cache file '{URLLIST_FILENAME}': {e}. Starting with empty cache.")
-                return {}
-            except Exception as e:
-                 logger.error(f"Unexpected error loading cache '{URLLIST_FILENAME}': {e}. Starting with empty cache.", exc_info=True)
-                 return {}
-        else:
-            logger.info(f"Cache file '{URLLIST_FILENAME}' not found. Starting with empty cache.")
-            return {}
+                self.notify_user_ids = [int(uid.strip()) for uid in self.notify_user_ids_str.split(',') if uid.strip()]
+            except ValueError:
+                logger.error("Invalid user ID in NOTIFY_USER_IDS. Must be comma-separated integers.")
+        
+        self.url_regex = re.compile(r'(?:https?://|www\.)[^\s<>"\(\)\[\]{}]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:[^\s<>"\(\)\[\]{}]*)?')
+        logger.info(f"LinkScannerCog loaded. Alert Channel: {self.suspicious_channel_id}, Role: {self.suspicious_role_id}, Mode: {self.analysis_mode}")
 
-    def _save_cache(self):
-        """Saves the current URL cache to the JSON file."""
-        logger.info(f"Attempting to save {len(self.url_cache)} URLs to cache file '{URLLIST_FILENAME}'.")
-        try:
-            with open(URLLIST_FILENAME, 'w', encoding='utf-8') as f:
-                json.dump(self.url_cache, f, indent=2, default=str) # Use default=str for non-serializable types like datetime
-            logger.info(f"Successfully saved cache file '{URLLIST_FILENAME}'.")
-        except IOError as e:
-            logger.error(f"Could not write cache file '{URLLIST_FILENAME}': {e}")
-        except TypeError as e:
-            logger.error(f"Failed to serialize cache data for '{URLLIST_FILENAME}': {e}. Cache NOT saved.")
-        except Exception as e:
-             logger.error(f"Unexpected error saving cache '{URLLIST_FILENAME}': {e}", exc_info=True)
+
+    async def _test_redis_connection(self):
+        if self.redis_client:
+            try:
+                await self.redis_client.ping()
+                logger.info("Cog successfully connected to Redis server.")
+                return True
+            except RedisExceptions.AuthenticationError as e:
+                logger.error(f"Cog Redis auth failed: {e}. Caching unavailable.", exc_info=False)
+                self.redis_client = None
+                return False
+            except RedisExceptions.ConnectionError as e:
+                logger.error(f"Cog Redis connection failed: {e}. Caching unavailable.", exc_info=True)
+                self.redis_client = None
+                return False
+            except Exception as e: 
+                logger.error(f"Cog unexpected Redis ping error: {e}. Caching unavailable.", exc_info=True)
+                self.redis_client = None
+                return False
+        return False
+
+    async def cog_load(self):
+        logger.info("LinkScannerCog is loading...")
+        await self._test_redis_connection()
 
     async def cog_unload(self):
-        """Clean up resources and save cache when the cog is unloaded."""
         logger.info("Unloading LinkScannerCog...")
-        self._save_cache() # Save cache before closing session
         if self.analyzer:
-            await self.analyzer.close_session()
-            logger.info("Closed URL analyzer session during cog unload.")
+            await self.analyzer.close_sessions()
+            logger.info("Closed Analyzer sessions.")
+        if self.redis_client:
+            try:
+                await self.redis_client.close()
+                logger.info("Closed Cog Redis client connection.")
+            except Exception as e:
+                logger.error(f"Error closing Cog Redis client: {e}", exc_info=True)
 
-    def _normalize_url_for_cache(self, url: str) -> str:
-        """
-        Normalizes a URL string for consistent cache keys.
-        Ensures scheme is present and lowercases hostname.
-        """
-        original_url = url # Keep original for logging if needed
+    def _get_cache_key_and_normalization_target(self, url: str) -> Tuple[str, str]:
+        if self.analysis_mode == "domain":
+            try:
+                parsed_components = self.analyzer._parse_url_components(url)
+                domain_parts = parsed_components.get("domain_parts", {})
+                target_for_analysis = domain_parts.get("registered_domain")
+                if not target_for_analysis:
+                    target_for_analysis = parsed_components.get("netloc", urlparse(url).netloc.lower())
+                if not target_for_analysis:
+                    logger.warning(f"Could not extract valid domain/netloc for '{url}' in domain mode. Using raw URL for key.")
+                    target_for_analysis = url 
+                cache_key = f"{DOMAIN_CACHE_PREFIX}{target_for_analysis}"
+                return cache_key, target_for_analysis
+            except Exception as e:
+                logger.error(f"Error normalizing URL '{url}' for domain mode cache: {e}. Using full URL.")
+                normalized_full = self._normalize_full_url(url)
+                return f"{FULL_URL_CACHE_PREFIX}{normalized_full}", normalized_full
+        else: # "full_url" mode
+            normalized_full = self._normalize_full_url(url)
+            cache_key = f"{FULL_URL_CACHE_PREFIX}{normalized_full}"
+            return cache_key, normalized_full
+            
+    def _normalize_full_url(self, url: str) -> str:
         try:
-            # Ensure scheme is present
             if '://' not in url:
-                if url.startswith("www."):
-                    url = "http://" + url # Assume http for www. if missing scheme
-                else:
-                    # Defaulting to http might be okay, but could be https.
-                    # Parsing without scheme can be tricky. Let's try adding http as default guess.
-                    url = "http://" + url
-
-            parsed = urlparse(url)
-            # Reconstruct with lowercase scheme and netloc, keep path/query/fragment case
-            # Handle potential AttributeError if parsing fails badly (though try/except helps)
-            scheme = parsed.scheme.lower() if parsed.scheme else 'http' # Default scheme
-            netloc = parsed.netloc.lower() if parsed.netloc else '' # Lowercase domain/ip
-
-            # Remove default ports (optional, but increases cache hits)
-            if (scheme == 'http' and netloc.endswith(':80')) or \
-               (scheme == 'https' and netloc.endswith(':443')):
-                    netloc = netloc.rsplit(':', 1)[0]
-            #netloc = netloc.rsplit(':', 1)[0]
-            # Remove trailing '/' from path if path is not just '/' (optional)
+                if url.startswith("www."): url = "http://" + url
+                else: url = "https://" + url 
+            parsed = urlparse(url); scheme = parsed.scheme.lower(); netloc = parsed.netloc.lower()
+            if (scheme == 'http' and netloc.endswith(':80')) or (scheme == 'https' and netloc.endswith(':443')):
+                netloc = netloc.rsplit(':', 1)[0]
             path = parsed.path
-            if path != '/' and path.endswith('/'):
-                  path = path[:-1]
-
-            # Rebuild (consider if query params order matters - sorting them could increase cache hits but is complex)
-            # For now, just use lowercase scheme/netloc
-            #normalized = f"{scheme}://{netloc}{path}"
-            normalized = f"{scheme}://{netloc}"
-            if parsed.query:
-                normalized += f"?{parsed.query}"
-            if parsed.fragment:
-                normalized += f"#{parsed.fragment}"
-
+            if path != '/' and path.endswith('/'): path = path[:-1]
+            if not path: path = '/'
+            normalized = f"{scheme}://{netloc}{path}"
+            if parsed.query: normalized += f"?{parsed.query}"
             return normalized
-        except Exception as e:
-            logger.warning(f"Failed to normalize URL '{original_url}': {e}. Using original URL as cache key.")
-            return original_url # Fallback to original URL if normalization fails
+        except Exception as e: logger.warning(f"Failed to normalize full URL '{url}': {e}. Using original."); return url
 
-    # --- Main Event Listener ---
+    async def _get_from_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        if not self.redis_client: return None
+        try:
+            cached_data_bytes = await self.redis_client.get(cache_key)
+            if cached_data_bytes:
+                assessment_result = json.loads(cached_data_bytes.decode('utf-8'))
+                logger.info(f"Cache HIT for key: {cache_key}")
+                return assessment_result
+            logger.debug(f"Cache MISS for key: {cache_key}")
+            return None
+        except RedisExceptions.RedisError as e: logger.error(f"Redis GET error for key '{cache_key}': {e}", exc_info=True)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode cached JSON for key '{cache_key}': {e}", exc_info=True)
+            try: 
+                if self.redis_client: await self.redis_client.delete(cache_key)
+            except: pass 
+        return None
+
+    async def _save_to_cache(self, cache_key: str, assessment_result: Dict[str, Any]):
+        if not self.redis_client: return
+        try:
+            data_to_cache_bytes = json.dumps(assessment_result, default=str).encode('utf-8')
+            await self.redis_client.setex(cache_key, DEFAULT_CACHE_EXPIRY_SECONDS, data_to_cache_bytes)
+            logger.info(f"Saved to cache with key: {cache_key}")
+        except RedisExceptions.RedisError as e: logger.error(f"Redis SETEX error for key '{cache_key}': {e}", exc_info=True)
+        except TypeError as e: logger.error(f"Failed to serialize result for key '{cache_key}': {e}", exc_info=True)
+
     @commands.Cog.listener(name="on_message")
     async def on_message_scan(self, message: discord.Message):
-        # --- Basic Checks ---
-        if message.author == self.bot.user: return
-        if not message.guild: return # Ignore DMs
-        if not message.content: return
-        # --- Find Links ---
-        urls_found = [match.group(0) for match in self.url_regex.finditer(message.content)]
-        if not urls_found: return
+        if message.author == self.bot.user or not message.guild or not message.content: return
+        
+        urls_found_raw = [match.group(0) for match in self.url_regex.finditer(message.content)]
+        unique_urls_to_process = list(dict.fromkeys(
+            re.sub(r'[.,;:!?\)\]\}]$', '', raw_url) for raw_url in urls_found_raw
+        ))
 
-        logger.info(f"Found {len(urls_found)} URL(s) in message {message.id} from {message.author} ({message.author.id}) on {message.channel.name} ({message.channel.id})")
+        if not unique_urls_to_process: return
+        
+        logger.info(f"Found {len(unique_urls_to_process)} unique URL(s) in message {message.id} from {message.author}")
+        
+        message_overall_status: str = "SAFE" 
+        first_suspicious_assessment: Optional[Dict[str, Any]] = None
+        first_suspicious_raw_url: Optional[str] = None
+        reacted_cache = False
 
-        # --- Process Links ---
-        message_contains_suspicious = False
-        first_suspicious_url_details: Optional[Tuple[str, str]] = None # Stores (raw_url, analysis_json_str)
-
-        for raw_url in urls_found:
-            normalized_url = self._normalize_url_for_cache(raw_url)
-            logger.debug(f"Processing URL: {raw_url} (Normalized: {normalized_url})")
-
-            is_suspicious = False
-            analysis_data: Optional[Dict[str, Any]] = None # Store the dict form
-            analysis_json_str: Optional[str] = None # Store the string form
-            # LLM result is now part of the analysis_data dict fetched from cache or added after analysis
-
-            # --- Check Cache ---
-            cache_hit = False
-            if normalized_url in self.url_cache:
-                cache_hit = True
-                urls_found=True
-                logger.info(f"Cache hit for URL: {normalized_url}")
-                cached_entry = self.url_cache[normalized_url]
-                llm_classification = cached_entry.get('llm_classification') # This should be the main analysis dict
-                #analysis_data = cached_entry.get('analysis_data') # This should be the main analysis dict
-                if llm_classification:
-                    logger.info(f"LLM classification obtained from CACHE for {normalized_url}: {llm_classification}")
-                    if llm_classification.get("scam") == "YES" and llm_classification.get("confidence") in ["HIGH" ]:       
-                        is_suspicious = True                  
-                        logger.warning(f"Suspicious link : {normalized_url} classified as scam by LLM.")
-                    elif llm_classification.get('confidence') in ["LOW","MEDIUM"]:
-                        logger.warning(f"Link  : {normalized_url} classified as low or Medium.")
-                        analysis_json_str = await self.analyzer.analyze_url(raw_url) # Analyze original URL format
-                        analysis_data = json.loads(analysis_json_str)
-
-                        # 2. Determine suspicion based on new analysis
-                        risk_count = len(analysis_data.get("overall_summary", {}).get("potential_risks", []))
-                        error_count = len(analysis_data.get("overall_summary", {}).get("errors_encountered", []))
-                        total_risk_count = risk_count + error_count
-                        # Log the analysis result
-                        logger.info(f"URL: {raw_url} | Risk Count: {total_risk_count} (Threshold: {self.suspicion_threshold})")
-                        if total_risk_count >= self.suspicion_threshold :
-                            is_suspicious = True
-                            logger.warning(f"Suspicious link detected: {raw_url} (Risks: {total_risk_count}) posted by {message.author}")
-                    else:   
-                        is_suspicious = False # LLM didn't classify as scam
-                        logger.warning(f"Clean Link : {raw_url} classified as clean by LLM.")
-                #try: await message.add_reaction(REACTION_CACHE)
-                #except Exception: pass # Ignore reaction errors
-            # --- If Not in Cache or Cache Invalid, Analyze ---
-            if not cache_hit: # Analyze if cache miss or invalid cache data
-                logger.info(f"Cache miss or invalid cache for {raw_url}. Analyzing...")
-                llm_classification: Optional[Dict[str, str]] = None
+        for i, raw_url in enumerate(unique_urls_to_process, 1):
+            cache_key, target_for_log = self._get_cache_key_and_normalization_target(raw_url)
+            logger.debug(f"Processing URL ({i}/{len(unique_urls_to_process)}): Raw='{raw_url}', CacheKeyTarget='{target_for_log}', CacheKey='{cache_key}'")
+            
+            assessment_result = await self._get_from_cache(cache_key)
+            if assessment_result:
+                if not reacted_cache: 
+                    try: await message.add_reaction(REACTION_CACHE); reacted_cache = True
+                    except Exception: pass
+            else:
+                logger.info(f"Analyzing URL (cache miss for key '{cache_key}'): {raw_url}")
                 try:
-                    # 1. Get analysis data
-                    '''                    
-                    # 3. Optional: Call LLM if analysis succeeded
-                    # Decide if your bot logic *needs* the LLM result immediately for actions
-                    # If only for caching/later review, this could be deferred or done here.
-                    # Let's assume we want it for the cache record if available.
-                    '''
-                    llm_classification = await self.analyzer.get_llm_classification(normalized_url)
-                    if llm_classification:
-                        logger.info(f"LLM classification obtained for {normalized_url}: {llm_classification}")
-                        if llm_classification.get("scam") == "YES" and llm_classification.get("confidence") in ["HIGH"]:       
-                            is_suspicious = True                  
-                            logger.warning(f"Suspicious link : {normalized_url} classified as scam by LLM.")
-                        elif llm_classification.get('confidence') in ["LOW","MEDIUM"]:
-                            logger.warning(f"Link  : {normalized_url} classified as low or Medium.")
-                            analysis_json_str = await self.analyzer.analyze_url(raw_url) # Analyze original URL format
-                            analysis_data = json.loads(analysis_json_str)
-                            
-                            # 2. Determine suspicion based on new analysis
-                            risk_count = len(analysis_data.get("overall_summary", {}).get("potential_risks", []))
-                            error_count = len(analysis_data.get("overall_summary", {}).get("errors_encountered", []))
-                            total_risk_count = risk_count + error_count
-                            # Log the analysis result
-                            logger.info(f"URL: {raw_url} | Risk Count: {total_risk_count} (Threshold: {self.suspicion_threshold})")
-                            if total_risk_count >= self.suspicion_threshold :
-                                is_suspicious = True
-                                llm_classification['reason'] = "\n ".join(analysis_data.get("overall_summary").get("potential_risks") + analysis_data.get("overall_summary").get("errors_encountered"))
-                                logger.warning(f"Suspicious link detected: {raw_url} (Risks: {total_risk_count}) posted by {message.author}")
-                        else:   
-                            is_suspicious = False # LLM didn't classify as scam
-                            logger.warning(f"Clean Link : {raw_url} classified as clean by LLM.")
-
-                    else:
-                         # Log if LLM failed but config was present
-                        if self.analyzer.llm_token and self.analyzer.llm_api_url:
-                            logger.warning(f"LLM classification failed or returned invalid data for {raw_url}")
-
-                    # 4. Update cache with both analysis and LLM results
-                    self.url_cache[normalized_url] = {
-                        'llm_classification': llm_classification # Store LLM dict or None
-                    }
-                    logger.warning(f"Updated cache for URL: {normalized_url}")
-
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to decode JSON response during analysis for URL {raw_url}: {e}")
-                    normalized_url = None # Ensure unavailable for reporting
-                    is_suspicious = False # Cannot determine suspicion
+                    assessment_result = await self.analyzer.get_holistic_url_assessment(raw_url)
+                    await self._save_to_cache(cache_key, assessment_result)
                 except Exception as e:
-                    logger.error(f"Unexpected error during URL analysis for {raw_url}: {e}", exc_info=True)
-                    normalized_url = None # Ensure unavailable for reporting
-                    is_suspicious = False # Cannot determine suspicion
-                # End of analysis block
+                    logger.error(f"Critical error during URL analysis for '{raw_url}': {e}", exc_info=True)
+                    assessment_result = {
+                        "original_url": raw_url, 
+                        "assessment_summary": {
+                            "overall_is_scam": "ERROR", 
+                            "overall_confidence": "NONE",
+                            "overall_reason": f"Analysis pipeline failed: {type(e).__name__}"
+                        },
+                        "error": str(e)
+                    }
+            
+            if assessment_result:
+                summary = assessment_result.get("assessment_summary", {})
+                is_scam_str = summary.get("overall_is_scam", "UNKNOWN").upper()
+                if is_scam_str == "YES":
+                    logger.warning(f"Suspicious link DETECTED: '{raw_url}'. Reason: {summary.get('overall_reason', 'N/A')}")
+                    if message_overall_status != "SUSPICIOUS": message_overall_status = "SUSPICIOUS"
+                    if not first_suspicious_assessment: 
+                        first_suspicious_assessment = assessment_result
+                        first_suspicious_raw_url = raw_url
+                elif is_scam_str == "ERROR":
+                    logger.error(f"Error analyzing '{raw_url}'. Reason: {summary.get('overall_reason', 'N/A')}")
+                    if message_overall_status not in ["SUSPICIOUS", "ERROR"]: message_overall_status = "ERROR"
+            else: 
+                logger.error(f"Assessment result None for '{raw_url}'.")
+                if message_overall_status not in ["SUSPICIOUS", "ERROR"]: message_overall_status = "ERROR"
 
-            # --- Handle results for this specific URL ---
-            if is_suspicious:
-                message_contains_suspicious = True
-                # Record the first suspicious link and its JSON (if available)
-                if not first_suspicious_url_details:
-                    first_suspicious_url_details = (raw_url, normalized_url,) # Store tuple
+        if message_overall_status == "SUSPICIOUS" and first_suspicious_assessment and first_suspicious_raw_url:
+            try: await message.add_reaction(REACTION_SUSPICIOUS)
+            except Exception: pass
+            await self.handle_suspicious_link(message, first_suspicious_raw_url, first_suspicious_assessment)
+        elif message_overall_status == "SAFE":
+            if not any(str(r.emoji) in [REACTION_SUSPICIOUS, REACTION_ERROR] for r in message.reactions if r.me):
+                try: await message.add_reaction(REACTION_SAFE)
+                except Exception: pass
+        elif message_overall_status == "ERROR":
+            if not any(str(r.emoji) == REACTION_SUSPICIOUS for r in message.reactions if r.me):
+                try: await message.add_reaction(REACTION_ERROR)
+                except Exception: pass
 
-                # Add reaction immediately (only once per message if suspicious)
-                # Check if already added by cache hit or previous iteration
-                if REACTION_SUSPICIOUS not in [r.emoji for r in message.reactions]:
-                     try: await message.add_reaction(REACTION_SUSPICIOUS)
-                     except Exception: pass
-                # Optional: Break loop after first suspicious link if desired
-                # break
-
-            # End of loop for one URL
-
-        # --- Post-Loop Actions ---
-
-        # Add safe reaction only if URLs were found, none were suspicious, and no cache reaction added
-        if urls_found and not message_contains_suspicious:
-             already_reacted = any(r.emoji in [REACTION_SAFE, REACTION_SUSPICIOUS] for r in message.reactions if r.me)
-             if not already_reacted:
-                  try:
-                      await message.add_reaction(REACTION_SAFE)
-                  except Exception: pass
-
-        # Take action if *any* link in the message was found suspicious
-        if message_contains_suspicious and first_suspicious_url_details:
-            suspicious_url, normalized_url = first_suspicious_url_details
-            await self.handle_suspicious_link(message, suspicious_url, llm_classification,analysis_json_str)
-        elif message_contains_suspicious and not first_suspicious_url_details:
-             # This case means suspicion was flagged but details couldn't be stored (e.g., analysis failed entirely)
-             logger.error(f"Message {message.id} flagged as suspicious, but could not retrieve details for reporting.")
-             # You might still want to perform some action, like DMing mods without details
-
-
-    # --- Action Handler ---
-    async def handle_suspicious_link(self, message: discord.Message, suspicious_url: str, llm_classification: Dict[str, str],  analysis_json: Optional[str] = None):
-        """Handles logging, notifications, role assignment, and file attachment for a suspicious link."""
+    async def handle_suspicious_link(self, message: discord.Message, suspicious_raw_url: str, 
+                                     assessment_result: Dict[str, Any]):
         member = message.author
-        alert_channel = self.bot.get_channel(self.suspicious_channel_id)
-        suspicious_role = message.guild.get_role(self.suspicious_role_id) if message.guild else None
+        alert_channel = self.bot.get_channel(self.suspicious_channel_id) if self.suspicious_channel_id else None
+        suspicious_role = message.guild.get_role(self.suspicious_role_id) if self.suspicious_role_id and message.guild else None
 
-        # Check if required components exist before proceeding
-        if not alert_channel and not self.notify_user_ids and not suspicious_role:
-             logger.warning(f"Suspicious link {suspicious_url} detected, but no action configured (no alert channel, notify users, or role).")
-             return
+        summary = assessment_result.get("assessment_summary", {})
+        reason = summary.get("overall_reason", "No specific reason provided by assessment.")
+        confidence = summary.get("overall_confidence", "N/A")
 
-        logger.info(f"Taking action for suspicious link {suspicious_url} in message {message.id} by user {member.id}")
+        logger.info(f"Handling suspicious link '{suspicious_raw_url}' from {member.name} (ID: {member.id}). Reason: {reason}, Confidence: {confidence}")
 
-        
-        # Prepare JSON file attachment (only if JSON is available)
-        json_file = None
-        if analysis_json:
+        attachment_json_str: Optional[str] = None
+        if summary.get("overall_is_scam") == "YES":
             try:
-                 # Ensure it's a valid JSON string before creating file
-                 json.loads(analysis_json) # Test parsing
-                 json_filename = f"analysis_msg_{message.id}_user_{member.id}.json"
-                 json_file = discord.File(
-                     io.StringIO(analysis_json), # Use io.StringIO for string data
-                     filename=json_filename
-                 )
-                 logger.debug("Created JSON file object for attachment.")
-            except json.JSONDecodeError:
-                logger.error("Analysis data for attachment was not valid JSON.")
-                json_file = None
+                attachment_json_str = await self.analyzer.generate_full_analysis_report_for_attachment(assessment_result)
+                if not attachment_json_str:
+                    logger.info(f"generate_full_analysis_report_for_attachment returned None for '{suspicious_raw_url}'.")
             except Exception as e:
-                 logger.error(f"Failed to create analysis file object: {e}")
-                 json_file = None # Ensure it's None if creation fails
+                logger.error(f"Failed to generate attachment JSON for '{suspicious_raw_url}': {e}", exc_info=True)
         
-        # 1. Notify Alert Channel
+        json_file_to_send: Optional[discord.File] = None
+        if attachment_json_str:
+            try:
+                parsed_url_for_filename = urlparse(suspicious_raw_url)
+                safe_filename_base = re.sub(r'[^a-zA-Z0-9_-]', '_', parsed_url_for_filename.netloc or parsed_url_for_filename.path or "unknown_url")
+                json_filename = f"analysis_msg_{message.id}_{safe_filename_base[:30]}.json"
+                json_file_to_send = discord.File(io.BytesIO(attachment_json_str.encode('utf-8')), filename=json_filename)
+                logger.debug(f"Created discord.File object: {json_filename}")
+            except Exception as e:
+                logger.error(f"Failed to create discord.File object for attachment: {e}", exc_info=True)
+
         if alert_channel:
             embed = discord.Embed(
-                title="🚨 Suspicious Link Detected!",
+                title="🚨 Suspicious Link Detected by AI!",
                 description=f"Found in message: {message.jump_url}",
                 color=discord.Color.red(),
                 timestamp=message.created_at
             )
-            reason= llm_classification.get("reason", "No reason provided.")
-            embed.add_field(name="Link Detected", value=f"`{suspicious_url}`", inline=False)
+            embed.add_field(name="Link Detected", value=f"`{discord.utils.escape_markdown(suspicious_raw_url)}`", inline=False)
             embed.add_field(name="Posted By", value=f"{member.mention} ({member.display_name})", inline=True)
             embed.add_field(name="User ID", value=f"`{member.id}`", inline=True)
-            embed.add_field(name="In Channel", value=message.channel.mention, inline=True)
-            embed.add_field(name="Reason", value=f"`{reason}`", inline=True)
-            embed.set_footer(text="Investigate link. Full analysis attached (if available).")
-
+            embed.add_field(name="In Channel", value=message.channel.mention if message.channel else "Unknown Channel", inline=True)
+            embed.add_field(name="AI Assessed Confidence", value=str(confidence), inline=True)
+            embed.add_field(name="AI Reason", value=discord.utils.escape_markdown(reason)[:1020] + ("..." if len(reason) > 1020 else ""), inline=False)
+            embed.set_footer(text="Full AI analysis report attached if available and link deemed scam.")
             try:
-                # Send embed and file (if it exists)
-                await alert_channel.send(embed=embed, file=json_file if json_file else discord.utils.MISSING)
-                log_msg = f"Sent alert to channel #{alert_channel.name} for link {suspicious_url}"
-                if json_file: log_msg += " with JSON attachment."
-                logger.info(log_msg)
-            except discord.Forbidden:
-                logger.error(f"Missing permissions (Send Messages/Attach Files?) in alert channel {self.suspicious_channel_id}")
+                await alert_channel.send(embed=embed, file=json_file_to_send if json_file_to_send else discord.utils.MISSING)
+                logger.info(f"Sent alert to #{alert_channel.name} for '{suspicious_raw_url}'. Attachment sent: {bool(json_file_to_send)}")
             except discord.HTTPException as e:
-                if e.code == 40005: # Request entity too large
-                    logger.error(f"Failed to send alert: Analysis JSON file is too large.")
-                    try: # Try sending embed without file
-                        await alert_channel.send(embed=embed, content="*Analysis JSON attachment too large to send.*")
+                logger.error(f"Failed to send alert to #{alert_channel.name} (HTTPException): {e.status} - {e.text}")
+                if e.code == 40005 and json_file_to_send: 
+                    try:
+                        await alert_channel.send(embed=embed, content="*AI Analysis JSON attachment was too large to send.*")
+                        logger.info(f"Sent alert to #{alert_channel.name} for '{suspicious_raw_url}' but attachment was too large.")
                     except Exception as fallback_e:
-                         logger.error(f"Failed to send fallback alert message: {fallback_e}")
-                else:
-                    logger.error(f"Failed to send alert message to channel {self.suspicious_channel_id}: {e}")
+                        logger.error(f"Failed to send fallback alert message (attachment too large): {fallback_e}", exc_info=True)
             except Exception as e:
-                 logger.error(f"Unexpected error sending alert message to channel {self.suspicious_channel_id}: {e}", exc_info=True)
-        # End alert channel notification
-
-        # 2. Notify Specific Users via DM
-        if self.notify_user_ids:
-            dm_message = (
-                f"🚨 **Suspicious Link Alert** 🚨\n\n"
-                f"A potentially suspicious link was detected in **{message.guild.name}**:\n"
-                f"- **Link:** `{suspicious_url}`\n"
-                f"- **Posted By:** {member.mention} ({member.display_name} / ID: `{member.id}`)\n"
-                f"- **In Channel:** {message.channel.mention}\n"
-                f"- **Message Link:** {message.jump_url}\n\n"
-                f"Please review the full alert and analysis in the designated channel (#{alert_channel.name if alert_channel else 'N/A'})."
-            )
-            for user_id in self.notify_user_ids:
-                try:
-                    user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                    if user:
-                        await user.send(dm_message)
-                        logger.info(f"Sent DM notification to user {user.name} ({user.id})")
-                    else:
-                        logger.warning(f"Could not find user with ID {user_id} to send DM.")
-                except discord.Forbidden:
-                    logger.warning(f"Cannot send DM to user {user_id} (likely blocked or DMs disabled).")
-                except discord.HTTPException as e:
-                    logger.error(f"Failed to send DM to user {user_id}: {e}")
-                except Exception as e:
-                     logger.error(f"Unexpected error sending DM to user {user_id}: {e}", exc_info=True)
-        # End DM notification
-
-        # 3. Assign Role
-        if suspicious_role and isinstance(member, discord.Member):
-            if suspicious_role in member.roles:
-                 logger.info(f"User {member.id} already has the suspicious role ({suspicious_role.id}). Skipping.")
+                logger.error(f"Unexpected error sending alert to #{alert_channel.name}: {e}", exc_info=True)
+        else:
+            if self.suspicious_channel_id != 0:
+                logger.warning("Suspicious Channel ID configured but channel not found. Cannot send alert.")
             else:
-                try:
-                    #await member.add_roles(suspicious_role, reason=f"Posted suspicious link: {suspicious_url}")
-                    logger.info(f"Assigned role '{suspicious_role.name}' ({suspicious_role.id}) to user {member.name} ({member.id})")
-                    try: # Attempt to notify user about role assignment
-                        await member.send(f"You have been assigned the '{suspicious_role.name}' role in **{message.guild.name}** due to posting a potentially suspicious link ({suspicious_url}). Please contact a moderator if you believe this is an error.")
-                    except discord.Forbidden:
-                         logger.warning(f"Could not DM user {member.id} about role assignment.")
-                    except Exception as e:
-                         logger.error(f"Error DMing user {member.id} about role assignment: {e}")
-                except discord.Forbidden:
-                    logger.error(f"Missing 'Manage Roles' permission or role hierarchy issue. Cannot assign role {suspicious_role.id} to user {member.id}.")
-                except discord.HTTPException as e:
-                    logger.error(f"Failed to assign role {suspicious_role.id} to user {member.id}: {e}")
-                except Exception as e:
-                    logger.error(f"Unexpected error assigning role {suspicious_role.id} to user {member.id}: {e}", exc_info=True)
-        elif not suspicious_role:
-             # Logged during init if ID is invalid, but log again if role object not found in guild
-             logger.warning(f"Could not find suspicious role object with ID {self.suspicious_role_id} in guild {message.guild.name} ({message.guild.id}) during action handling.")
-        # End role assignment
-        # 4. label the link as suspicious in the message with a embed reply to the message
-        try:
-            embed = discord.Embed(
-                title="Warning---Suspicious Link Detected!",
-                description=f"Found in message: {message.jump_url}",
-                color=discord.Color.red(),
+                logger.info("Suspicious Channel ID not configured. Skipping channel alert.")
+
+        if self.notify_user_ids:
+            dm_embed = discord.Embed(
+                title="🚨 AI Detected Suspicious Link Alert 🚨",
+                description=f"A potentially suspicious link was detected by AI in **{message.guild.name if message.guild else 'Unknown Server'}**:",
+                color=discord.Color.orange(),
                 timestamp=message.created_at
             )
-            reason= llm_classification.get("reason")
-            embed.add_field(name="Link Detected", value=f"`{suspicious_url}`", inline=False)
-            embed.add_field(name="Posted By", value=f"{member.mention} ({member.display_name})", inline=True)
-            embed.add_field(name="Reason", value=f"`{reason}`", inline=True)
-            embed.set_footer(text="There will be consecuences.")
-            await message.reply(embed=embed)
-        except Exception as e:
-             logger.error(f"Failed to reply to message {message.id} with suspicious link alert: {e}", exc_info=True)
+            dm_embed.add_field(name="Link", value=f"`{discord.utils.escape_markdown(suspicious_raw_url)}`", inline=False)
+            dm_embed.add_field(name="Posted By", value=f"{member.mention} ({member.display_name} / ID: `{member.id}`)", inline=False)
+            dm_embed.add_field(name="In Channel", value=message.channel.mention if message.channel else "N/A", inline=True)
+            dm_embed.add_field(name="Message Link", value=message.jump_url, inline=True)
+            dm_embed.add_field(name="AI Reason", value=discord.utils.escape_markdown(reason)[:1020], inline=False)
+            dm_embed.set_footer(text=f"Alert Channel: #{alert_channel.name if alert_channel else 'Not Configured'}")
 
-# Setup function required by discord.py to load the cog
+            for user_id_to_notify in self.notify_user_ids: # Corrected variable name
+                try:
+                    user_object = self.bot.get_user(user_id_to_notify) or await self.bot.fetch_user(user_id_to_notify)
+                    if user_object: # CORRECTED: if condition for user_object
+                        await user_object.send(embed=dm_embed) # CORRECTED: proper block
+                    logger.info(f"Sent DM notification to {user_object.name if user_object else 'Unknown User'} ({user_id_to_notify})") # Check if user_object is None
+                except discord.Forbidden: 
+                    logger.warning(f"Cannot send DM to user {user_id_to_notify} (DMs disabled or bot blocked).")
+                except Exception as e: 
+                    logger.error(f"Failed to send DM to user {user_id_to_notify}: {e}", exc_info=True)
+        
+        if suspicious_role and isinstance(member, discord.Member):
+            if suspicious_role not in member.roles:
+                try:
+                    await member.add_roles(suspicious_role, reason=f"Posted AI-flagged suspicious link: {suspicious_raw_url[:100]}")
+                    logger.info(f"Assigned role '{suspicious_role.name}' to {member.name}")
+                    try:
+                        await member.send(f"You have been assigned the '{suspicious_role.name}' role in **{message.guild.name}** due to posting a link that our AI systems flagged as potentially suspicious. Please contact a moderator if you believe this is an error.")
+                    except discord.Forbidden: 
+                        logger.warning(f"Could not DM user {member.name} about role assignment (DMs disabled).")
+                    except Exception as e:
+                        logger.error(f"Error DMing user {member.name} about role assignment: {e}", exc_info=True)
+                except discord.Forbidden: 
+                    logger.error(f"Missing 'Manage Roles' permission or role '{suspicious_role.name}' is higher than bot's role. Cannot assign.")
+                except Exception as e: 
+                    logger.error(f"Failed to assign role '{suspicious_role.name}' to {member.name}: {e}", exc_info=True)
+            else: 
+                logger.info(f"User {member.name} already has role '{suspicious_role.name}'.")
+        elif not suspicious_role and self.suspicious_role_id != 0:
+            logger.warning(f"Suspicious Role ID {self.suspicious_role_id} configured but role not found in server '{message.guild.name if message.guild else 'Unknown Guild'}'.")
+
+        try:
+            reply_embed = discord.Embed(
+                title="⚠️ Warning: Potentially Suspicious Link (AI Assessed)",
+                description=(
+                    f"{member.mention}, the link you posted has been flagged by our AI systems as potentially suspicious.\n"
+                    f"**AI Assessment Reason:** {discord.utils.escape_markdown(reason)[:1500]}\n\n"
+                    f"Please exercise caution. Moderators have been notified for review."
+                ),
+                color=discord.Color.orange(),
+                timestamp=message.created_at
+            )
+            reply_embed.set_footer(text="This is an automated AI assessment. A human moderator may review this.")
+            await message.reply(embed=reply_embed, mention_author=True)
+            logger.info(f"Replied with AI warning to message {message.id}")
+        except Exception as e:
+            logger.error(f"Failed to reply with warning to message {message.id}: {e}", exc_info=True)
+
 async def setup(bot: commands.Bot):
-    # Perform pre-checks if necessary (e.g., ensuring critical env vars are set for Discord actions)
     if not os.getenv("SUSPICIOUS_CHANNEL_ID") and not os.getenv("NOTIFY_USER_IDS") and not os.getenv("SUSPICIOUS_ROLE_ID"):
-         logger.critical("No action configured (Channel ID, Notify IDs, Role ID). Cog actions will be ineffective.")
-         # Decide if you want to prevent loading:
-         # raise commands.ExtensionFailed("No action environment variables configured.")
-    await bot.add_cog(LinkScannerCog(bot))
-    logger.info("LinkScannerCog has been loaded.")
+         logger.warning("No primary action (Alert Channel ID, Notify User IDs, or Suspicious Role ID) is configured for LinkScannerCog. Actions may be limited.")
+    
+    cog_instance = LinkScannerCog(bot)
+    await bot.add_cog(cog_instance)
+    logger.info("LinkScannerCog has been prepared and added to the bot.")
