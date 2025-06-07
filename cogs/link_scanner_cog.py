@@ -72,7 +72,11 @@ class LinkScannerCog(commands.Cog):
             except ValueError:
                 logger.error("Invalid user ID in NOTIFY_USER_IDS. Must be comma-separated integers.")
         
-        self.url_regex = re.compile(r'(?:https?://|www\.)[^\s<>"\(\)\[\]{}]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:[^\s<>"\(\)\[\]{}]*)?')
+        self.url_regex = re.compile(
+            r'(?:https?://|www\.)[^\s<>"()[\]{}]+|'
+            r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|net|org|gov|edu|info|biz|io|ai|co|de|uk|ca|au|fr|gg|me|sh|ly|tv|us|jp|cn|ru|br|in|es|it|nl|be|xyz)\b|'
+            r'(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}/[^\s<>"()[\]{}]*'
+        )
         logger.info(f"LinkScannerCog loaded. Alert Channel: {self.suspicious_channel_id}, Role: {self.suspicious_role_id}, Mode: {self.analysis_mode}")
 
 
@@ -179,16 +183,57 @@ class LinkScannerCog(commands.Cog):
 
     @commands.Cog.listener(name="on_message")
     async def on_message_scan(self, message: discord.Message):
-        if message.author == self.bot.user or not message.guild or not message.content: return
+        if message.author == self.bot.user or not message.guild:
+            return
+
+        # Use a set to automatically handle duplicate URLs
+        found_urls = set()
+
+        # Scan the raw message content
+        if message.content:
+            for match in self.url_regex.finditer(message.content):
+                found_urls.add(match.group(0))
+
+        # Scan all embeds attached to the message
+        if message.embeds:
+            for embed in message.embeds:
+                # Aggregate all text content from the embed into one string
+                text_to_scan = []
+                if embed.title and isinstance(embed.title, str):
+                    text_to_scan.append(embed.title)
+                if embed.description and isinstance(embed.description, str):
+                    text_to_scan.append(embed.description)
+                if embed.url and isinstance(embed.url, str):
+                    text_to_scan.append(embed.url)
+                if embed.author and embed.author.url and isinstance(embed.author.url, str):
+                    text_to_scan.append(embed.author.url)
+                if embed.footer and embed.footer.text and isinstance(embed.footer.text, str):
+                    text_to_scan.append(embed.footer.text)
+                
+                for field in embed.fields:
+                    if field.name and isinstance(field.name, str):
+                        text_to_scan.append(field.name)
+                    if field.value and isinstance(field.value, str):
+                        text_to_scan.append(field.value)
+                
+                full_embed_text = "\n".join(text_to_scan)
+                if full_embed_text:
+                    for match in self.url_regex.finditer(full_embed_text):
+                        found_urls.add(match.group(0))
         
-        urls_found_raw = [match.group(0) for match in self.url_regex.finditer(message.content)]
+        # If no URLs were found in content or embeds, exit
+        if not found_urls:
+            return
+        
+        # Sanitize and create a list of unique URLs to process
         unique_urls_to_process = list(dict.fromkeys(
-            re.sub(r'[.,;:!?\)\]\}]$', '', raw_url) for raw_url in urls_found_raw
+            re.sub(r'[.,;:!?\)\]\}]$', '', raw_url) for raw_url in found_urls
         ))
 
-        if not unique_urls_to_process: return
+        if not unique_urls_to_process:
+            return
         
-        logger.info(f"Found {len(unique_urls_to_process)} unique URL(s) in message {message.id} from {message.author}")
+        logger.info(f"Found {len(unique_urls_to_process)} unique URL(s) in message {message.id} from {message.author} (content & embeds)")
         
         message_overall_status: str = "SAFE" 
         first_suspicious_assessment: Optional[Dict[str, Any]] = None
